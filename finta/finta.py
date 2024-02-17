@@ -807,15 +807,7 @@ class TA:
 
         return pd.Series(_TR["TR"], name="TR")
 
-    @classmethod
-    def ATR(cls, ohlc: DataFrame, period: int = 14) -> Series:
-        """Average True Range is moving average of True Range."""
 
-        TR = cls.TR(ohlc)
-        return pd.Series(
-            TR.rolling(center=False, window=period).mean(),
-            name="{0} period ATR".format(period),
-        )
 
     @classmethod
     def SAR(cls, ohlc: DataFrame, af: int = 0.02, amax: int = 0.2) -> Series:
@@ -2301,6 +2293,64 @@ class TA:
         wavepm = osc(dev, ma, power)
 
         return pd.Series(wavepm, name="{0} period WAVEPM".format(period))
+    
+    @classmethod
+    def ATR(cls, ohlc: DataFrame, period: int = 14) -> Series:
+        """Average True Range is moving average of True Range."""
+
+        TR = cls.TR(ohlc)
+        return pd.Series(
+            TR.rolling(center=False, window=period).mean(),
+            name="{0} period ATR".format(period),
+        )
+    
+    @classmethod
+    def ATR_Klemen(cls, ohlc: DataFrame, period: int = 36) -> Series:
+        """Average True Range using EWMA for closer approximation to Pine Script's RMA."""
+        TR = cls.TR(ohlc)
+        # Using EWMA (Exponential Weighted Moving Average) to approximate RMA
+        return pd.Series(
+            TR.ewm(span=period, adjust=False).mean(),
+            name="{0} period ATR".format(period),
+    )
+
+    @classmethod
+    def MTD(cls, ohlc: DataFrame, ema_period: int = 36, atr_period: int = 36, column: str = "close") -> DataFrame:
+        """
+        Custom MTD Indicator consisting of a baseline (EMA), an upper band (EMA + ATR/2), and a lower band (EMA - ATR/2).
+        """
+        baseline = cls.EMA(ohlc, period=ema_period, column=column)
+        atr = cls.ATR_Klemen(ohlc, period=atr_period)
+        
+        upper_band = baseline + (atr / 2)
+        lower_band = baseline - (atr / 2)
+        
+        return pd.DataFrame({
+            'Baseline': baseline,
+            'Upper Band': upper_band,
+            'Lower Band': lower_band
+        })
+
+    import pandas as pd
+
+    @classmethod
+    def Lelec(cls, ohlc: pd.DataFrame, bars: int = 10, length: int = 40) -> pd.Series:
+            bindex = sindex = 0
+            signals = pd.Series(data=0, index=ohlc.index)
+
+            for i in range(len(ohlc)):
+                if i >= 4:  # Ensure there's enough data to look back 4 periods
+                    bindex += 1 if ohlc['close'].iat[i] > ohlc['close'].iat[i - 4] else 0
+                    sindex += 1 if ohlc['close'].iat[i] < ohlc['close'].iat[i - 4] else 0
+
+                    if bindex > bars and ohlc['close'].iat[i] < ohlc['open'].iat[i] and ohlc['high'].iat[i] >= ohlc['high'].rolling(window=length).max().iat[i]:
+                        bindex = 0
+                        signals.iat[i] = -1
+                    elif sindex > bars and ohlc['close'].iat[i] > ohlc['open'].iat[i] and ohlc['low'].iat[i] <= ohlc['low'].rolling(window=length).min().iat[i]:
+                        sindex = 0
+                        signals.iat[i] = 1
+
+            return signals
 
 
 if __name__ == "__main__":
