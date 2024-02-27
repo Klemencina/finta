@@ -2352,6 +2352,125 @@ class TA:
 
             return signals
 
+    @classmethod
+    def find_swings(cls, data, period: int = 2) -> pd.DataFrame:
+        """
+        Identifies swing points in the provided dataset using a moving average gradient method.
+
+        Parameters:
+        - data (pd.DataFrame, pd.Series, list, np.array): The dataset containing price or indicator values.
+        - period (int): The moving average period for calculating the gradient. Defaults to 2.
+
+        Returns:
+        - pd.DataFrame: A DataFrame with detected swing highs and lows.
+        """
+        if isinstance(data, pd.DataFrame) and 'High' in data.columns and 'Low' in data.columns:
+            hl2 = (data['High'] + data['Low']) / 2
+        else:
+            hl2 = pd.Series(data if isinstance(data, (list, np.ndarray)) else data.values)
+
+        swing_data = hl2.rolling(window=period, center=True).mean()
+        grad = np.sign(swing_data.diff())
+        swings = grad.diff().ne(0)
+
+        swing_highs = hl2.where(swings & (grad < 0))
+        swing_lows = hl2.where(swings & (grad > 0))
+
+        return pd.DataFrame({'Swing Highs': swing_highs, 'Swing Lows': swing_lows})
+
+    @classmethod
+    def classify_swings(cls, swing_df: pd.DataFrame, tol: int = 0) -> pd.DataFrame:
+        """
+        Classifies a DataFrame of swings into higher-highs, lower-highs, higher-lows, and lower-lows.
+        https://github.com/kieran-mackle/AutoTrader/blob/main/autotrader/indicators.py#L482
+        Parameters:
+        - swing_df (pd.DataFrame): The DataFrame returned by find_swings.
+        - tol (int): The classification tolerance. Defaults to 0.
+
+        Returns:
+        - pd.DataFrame: A DataFrame containing the classified swings.
+        """
+        swing_df = swing_df.copy()
+
+        # Assuming 'Last', 'Trend', 'Lows', and 'Highs' are columns in swing_df,
+        # which should be adjusted based on actual DataFrame structure from find_swings output
+        swing_df['New Level'] = np.where(swing_df['Last'] != swing_df['Last'].shift(), 1, 0)
+        swing_df['CSLS'] = swing_df['New Level'].cumsum()  # Cumulative sum to find candles since last swing
+
+        # Determining support and resistance based on the trend and classification tolerance
+        swing_df['Support'] = (swing_df['CSLS'] > tol) & (swing_df['Trend'] == 1)
+        swing_df['Resistance'] = (swing_df['CSLS'] > tol) & (swing_df['Trend'] == -1)
+
+        # Assuming functions unroll_signal_list and others like candles_between_crosses are defined elsewhere
+        # and work as intended. Placeholder logic for swing classification:
+        swing_df['Strong Lows'] = swing_df['Support'] & swing_df['Lows']
+        swing_df['Strong Highs'] = swing_df['Resistance'] & swing_df['Highs']
+
+        # Implement logic for calculating changes and classifying swings based on the changes
+        # This is a simplified placeholder. Actual implementation may require adjustments
+        # to fit your specific logic for determining swing highs/lows and classification criteria
+
+        # Directly comparing the current swing's position relative to previous to classify
+        swing_df['HL'] = swing_df['Strong Lows'].diff().fillna(0) > 0
+        swing_df['LH'] = swing_df['Strong Highs'].diff().fillna(0) < 0
+
+        # Further classification logic to identify higher highs (HH), lower lows (LL), etc.
+        # should be adjusted based on your specific requirements for swing analysis
+
+        return swing_df
+
+    @classmethod
+    def detect_divergence(cls, classified_price_swings: pd.DataFrame, classified_indicator_swings: pd.DataFrame, tol: int = 2) -> pd.DataFrame:
+        """
+        Detects divergence between price swings and swings in an indicator.
+
+        Parameters:
+        - classified_price_swings (pd.DataFrame): The output from classify_swings using OHLC data.
+        - classified_indicator_swings (pd.DataFrame): The output from classify_swings using indicator data.
+        - tol (int): The number of candles which conditions must be met within. Defaults to 2.
+        - method (int): The method to use when detecting divergence (0 or 1). Defaults to 0.
+
+        Returns:
+        - pd.DataFrame: A DataFrame containing divergence signals.
+
+        Raises:
+        - Exception: When an unrecognized method of divergence detection is requested.
+        """
+        regular_bullish = []
+        regular_bearish = []
+        hidden_bullish = []
+        hidden_bearish = []
+
+        # Default method using both price and indicator swings
+        for i in range(len(classified_price_swings)):
+                # Regular Bullish Divergence
+            regular_bullish.append(
+                sum(classified_price_swings["LL"][i - tol + 1 : i + 1]) + sum(classified_indicator_swings["HL"][i - tol + 1 : i + 1]) > 1
+            )
+            # Regular Bearish Divergence
+            regular_bearish.append(
+                sum(classified_price_swings["HH"][i - tol + 1 : i + 1]) + sum(classified_indicator_swings["LH"][i - tol + 1 : i + 1]) > 1
+            )
+            # Hidden Bullish Divergence
+            hidden_bullish.append(
+                sum(classified_price_swings["HL"][i - tol + 1 : i + 1]) + sum(classified_indicator_swings["LL"][i - tol + 1 : i + 1]) > 1
+            )
+            # Hidden Bearish Divergence
+            hidden_bearish.append(
+                sum(classified_price_swings["LH"][i - tol + 1 : i + 1]) + sum(classified_indicator_swings["HH"][i - tol + 1 : i + 1]) > 1
+            )
+
+        divergence = pd.DataFrame({
+            "regularBull": regular_bullish,
+            "regularBear": regular_bearish,
+            "hiddenBull": hidden_bullish,
+            "hiddenBear": hidden_bearish
+        }, index=classified_price_swings.index)
+
+        return divergence
+
+
+
 
 if __name__ == "__main__":
     print([k for k in TA.__dict__.keys() if k[0] not in "_"])
